@@ -1,0 +1,233 @@
+---
+title: "Evaluación de riesgos simplificada"
+author: "Eric Morales Mora"
+date: "24/3/2022"
+output: html_document
+      html_document:
+    toc: true
+    toc_float: true
+---
+
+#Evaluación de riesgos simplificada
+
+##Importar datos
+
+
+*Dataframe*
+
+```{r}
+library(readxl)
+library(dplyr)
+biogaval=read_excel("RUTA_ARCHIVO.xlsx")
+View(biogaval)
+glimpse(biogaval)
+
+#Filtro por PTAR
+
+media=filter(biogaval,escala_ptar=="Media")
+
+
+```
+
+##Comprimir datos 
+
+**Función dataset - data_compressor**
+
+```{r}
+library(dplyr)
+
+data_compressor=function(df_risk){
+  #filtro de datos por factores
+  
+  #daño potencial
+  ill_filter= filter(df_risk,componente=="Daño potencial")
+  #vía de transmisión
+  path_filter= filter(df_risk,componente=="Vía de transmisión")
+  #tasa de incidencia
+  incidence_filter= filter(df_risk,componente=="Tasa de incidencia")
+  #vacunación
+  vaccination_filter=filter(df_risk,componente=="Vacunación")
+  #frecuencia de la labor
+  work_filter= filter(df_risk,componente=="Frecuencia de realización de tareas de riesgo")
+  #aplicación de medidas higienicas
+  hygiene_filter=filter(df_risk,componente=="Medidas higienicas")
+  
+  #Ponderación de cumpliemiento de medidas higienicas
+  hygiene_filter=filter(biogaval,componente=="Medidas higienicas")
+  hygiene_filter=hygiene_filter%>%
+  group_by(clasificacion)%>%
+  summarise(n=n())
+  positive=filter(hygiene_filter, clasificacion=="Si")
+  negative=filter(hygiene_filter, clasificacion=="No")
+  hygiene_calculation=data.frame((positive$n/(positive$n+negative$n))*100)
+  colnames(hygiene_calculation)
+  names(hygiene_calculation)[names(hygiene_calculation) == "X.positive.n..positive.n...negative.n.....100"]="percentage"
+ 
+  
+  #Transformación de medidas higienicas de porcentaje a score
+  hygiene_calculation = hygiene_calculation %>%
+    mutate(score = case_when(
+    percentage<50 ~ as.numeric(0),
+    between(percentage,50,79)~as.numeric(-1),
+    between(percentage,80,95)~as.numeric(-2),
+    TRUE ~ as.numeric(-3)
+  ))
+
+  #Construcción de df de valores comprimidos
+  ill_score=rbind("score"=ill_filter$puntaje)
+  path_score=rbind("score"=path_filter$puntaje)
+  incidence_score=rbind("score"=incidence_filter$puntaje)
+  vaccination_score=rbind("score"=vaccination_filter$puntaje)
+  work_score=rbind("score"=work_filter$puntaje)
+  hygiene_score=rbind("score"=hygiene_calculation$score)
+  
+  
+  #Unión de df's comprimidos
+  df_scores=cbind.data.frame(ill_score,path_score,incidence_score,vaccination_score,work_score,hygiene_score)
+  return(df_scores)
+}
+
+```
+
+##Función de evaluación **Funcion de evaluacion - bio_assess**
+
+```{r}
+library(dplyr)
+
+bio_assess=function(ill_score, path_score, incidence_score, vaccination_score, work_score, hygiene_score){
+  #Calculo del puntaje de riesgo
+  risk_score=(ill_score*vaccination_score)+path_score+incidence_score+work_score+hygiene_score
+  #Clasificación del puntaje
+  if(risk_score<=12){
+  print(paste0("Puntuacion: ",risk_score, " - Aceptable (≤12)"))
+    }
+  else if(between(risk_score,12,17)){
+  print(paste0("Puntuacion: ",risk_score, " - Requiere aplicacición de medidas preventivas (12 - 17)"))
+    }
+  else{
+  print(paste0("Puntuacion: ",risk_score, " - Riesgo intolerable (>17) - se requieren medidas correctivas inmediatas"))
+  }
+}
+
+```
+
+##Evaluación simplificada
+
+*Evaluación simplificada Media*
+
+```{r}
+#Reducción de datos
+
+media_data=data_compressor(media)
+
+#Evaluación simplificada
+roble_assess=bio_assess(media_data$ill_score, media_data$path_score, media_data$incidence_score,media_data$vaccination_score,media_data$work_score,media_data$hygiene_score)
+
+```
+
+
+
+**Visualización medidas higienicas**
+
+*Preparación base de datos*
+
+```{r}
+library(dplyr)
+
+#Filtro medidas higienicas
+
+hygiene_assess=filter(biogaval,componente=="Medidas higienicas")
+names(hygiene_assess)
+View(hygiene_assess)
+
+```
+
+##Visualización de resultados
+
+*Administrativos*
+
+```{r}
+library(ggplot2)
+library(reshape)
+
+#Filtrado de datos
+hygiene_administrative=filter(hygiene_assess,tipo_control=="Administrativo")
+
+#Orden de niveles
+hygiene_administrative$clasificacion=factor(hygiene_administrative$clasificacion, levels = c("Si", "No","No aplica"))
+
+#Visualización
+hygiene_administrative=ggplot(hygiene_administrative, aes(y=factor_abreviado, x=escala_ptar, fill=clasificacion))+
+  geom_tile(alpha=0.85)+
+  scale_fill_manual(values = c('seagreen4','coral4','gray70'))+
+  labs(fill='Cumplimiento', x=expression(bold('Escala PTAR')),y="")+
+  theme(legend.position="top", panel.background = element_blank(),legend.title = element_text(size = 10, face="bold"), legend.text = element_text(size = 9.5, face = "italic"), axis.text = element_text(size = 9.5))
+hygiene_administrative
+
+
+png("hygiene_administrative.png", width = 2800, height = 1800, res = 350, pointsize = 10)
+
+hygiene_administrative
+
+dev.off()
+
+```
+
+*Infraestructura*
+
+```{r}
+library(ggplot2)
+library(reshape)
+
+#Filtrado de datos
+hygiene_infraestruture=filter(hygiene_assess,tipo_control=="Infraestructura")
+
+#Orden de niveles
+hygiene_infraestruture$clasificacion=factor(hygiene_infraestruture$clasificacion, levels = c("Si", "No","No aplica"))
+
+#Visualización
+hygiene_infraestruture=ggplot(hygiene_infraestruture, aes(y=factor_abreviado, x=escala_ptar, fill=clasificacion))+
+  geom_tile(alpha=0.85)+
+  scale_fill_manual(values = c('seagreen4','coral4','gray70'))+
+  labs(fill='Cumplimiento', x=expression(bold('Escala PTAR')),y="")+
+  theme(legend.position="top", panel.background = element_blank(),legend.title = element_text(size = 10, face="bold"), legend.text = element_text(size = 9.5, face = "italic"), axis.text = element_text(size = 9.5))
+hygiene_infraestruture
+
+png("hygiene_infraestruture.png", width = 2800, height = 1800, res = 350, pointsize = 10)
+
+hygiene_infraestruture
+
+dev.off()
+
+```
+
+*EPP*
+
+```{r}
+library(ggplot2)
+library(reshape)
+
+#Filtrado de datos
+hygiene_PPE=filter(hygiene_assess,tipo_control=="EPP")
+
+#Orden de niveles
+hygiene_PPE$clasificacion=factor(hygiene_PPE$clasificacion, levels = c("Si", "No","No aplica"))
+
+#Visualización
+hygiene_PPE=ggplot(hygiene_PPE, aes(y=factor_abreviado, x=escala_ptar, fill=clasificacion))+
+  geom_tile(alpha=0.85)+
+  scale_fill_manual(values = c('seagreen4','coral4','gray70'))+
+  labs(fill='Cumplimiento', x=expression(bold('Escala PTAR')),y="")+
+  theme(legend.position="top", panel.background = element_blank(),legend.title = element_text(size = 10, face="bold"), legend.text = element_text(size = 9.5, face = "italic"), axis.text = element_text(size = 9.5))
+hygiene_PPE
+
+
+png("hygiene_PPE.png", width = 2800, height = 1800, res = 350, pointsize = 10)
+
+hygiene_PPE
+
+dev.off()
+
+```
+
+
